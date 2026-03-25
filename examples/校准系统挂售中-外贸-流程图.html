@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>校准系统挂售中-外贸 — 完整流程图</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f0f2f5; padding: 20px; }
+  h1 { text-align: center; color: #1a1a1a; font-size: 22px; margin-bottom: 4px; }
+  .subtitle { text-align: center; color: #888; font-size: 13px; margin-bottom: 24px; }
+  .chart-section { background: #fff; border-radius: 12px; padding: 30px; max-width: 1600px; margin: 0 auto 24px; box-shadow: 0 1px 8px rgba(0,0,0,0.06); overflow-x: auto; }
+  .chart-section h2 { font-size: 16px; color: #333; margin-bottom: 16px; border-left: 4px solid #2196F3; padding-left: 10px; }
+  .chart-section.sub h2 { border-left-color: #9C27B0; }
+  .legend { max-width: 1600px; margin: 0 auto 20px; display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #666; }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-color { width: 14px; height: 14px; border-radius: 3px; }
+  .note { max-width: 1600px; margin: 0 auto; background: #fffde7; border: 1px solid #fff9c4; border-radius: 8px; padding: 14px 18px; font-size: 13px; color: #666; line-height: 1.6; }
+  .note code { background: #f5f5f5; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>校准系统挂售中-外贸 — 完整逻辑流程图</h1>
+<p class="subtitle">主流程 ID: 6944f290063a4bbf0780bebf | 子流程 ID: 694796196436ebbd45a77437</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-color" style="background:#2196F3"></div> 触发/入口</div>
+  <div class="legend-item"><div class="legend-color" style="background:#FF9800"></div> 数据查询</div>
+  <div class="legend-item"><div class="legend-color" style="background:#9C27B0"></div> 子流程</div>
+  <div class="legend-item"><div class="legend-color" style="background:#E91E63"></div> 条件判断</div>
+  <div class="legend-item"><div class="legend-color" style="background:#4CAF50"></div> 写入操作</div>
+  <div class="legend-item"><div class="legend-color" style="background:#607D8B"></div> 通知</div>
+  <div class="legend-item"><div class="legend-color" style="background:#00BCD4"></div> 数据处理</div>
+</div>
+
+<!-- 主流程 -->
+<div class="chart-section">
+<h2>主流程: 校准系统挂售中-外贸</h2>
+<pre class="mermaid">
+flowchart LR
+  START(["⏰ 定时触发\n从 2025-12-05 11:20"])
+  QUERY["📋 获取多条记录\n表: 挂售表-新逻辑\nactionId: 400\n(无筛选条件,取全部)"]
+  CALLSUB["📦 调用子流程\n→ 未命名子流程\n数据源: 查询工作表结果\n逐条传入子流程"]
+
+  START --> QUERY --> CALLSUB
+
+  classDef trigger fill:#2196F3,color:#fff,stroke:#1565C0,stroke-width:2px
+  classDef query fill:#FF9800,color:#fff,stroke:#E65100,stroke-width:2px
+  classDef subprocess fill:#9C27B0,color:#fff,stroke:#6A1B9A,stroke-width:2px
+
+  class START trigger
+  class QUERY query
+  class CALLSUB subprocess
+</pre>
+</div>
+
+<!-- 子流程 -->
+<div class="chart-section sub">
+<h2>子流程: 未命名子流程 (36节点)</h2>
+<pre class="mermaid">
+flowchart TB
+  ENTRY(["🔗 子流程入口\n表: 挂售表-新逻辑\n接收主流程逐条传入的记录\n输入参数: 校准系统挂售中-外贸"])
+
+  PROXY["🔍 获取单条: 代理\n表: 芝麻代理\nactionId: 406 (按筛选器)\n筛选: findFields为空\n(取第一条代理配置)"]
+
+  PRICE["🔍 获取单条: 查询工作表\n表: 比价数据\nactionId: 406 (按筛选器)\nresultTypeId: 3\nexecuteType: 2\n筛选: findFields为空\n(关联当前记录匹配)"]
+
+  ENTRY --> PROXY --> PRICE
+
+  %% ========== 顶层条件分支 ==========
+  BR_TOP{"❓ 条件互斥分支\ngatewayType: 1"}
+  PRICE --> BR_TOP
+
+  BR_TOP -->|"✅ 分支1 条件:\n[比价数据].snk_id >= 非空\nOR\n[比价数据].snk_id == '0'\n(有snk_id或snk_id为0)"| PAR_MAIN
+  BR_TOP -->|"❌ 分支2: else\n(比价数据中无匹配\n或snk_id不满足)"| NOTIFY
+
+  %% ========== 并行分支: 鞋子 vs 衣服 ==========
+  subgraph PAR_MAIN["⚡ 并行分支 (gatewayType: 2) — 同时处理鞋子和衣服"]
+    direction LR
+
+    %% ===== 鞋子线 =====
+    subgraph SHOE["🥾 鞋子处理线"]
+      direction TB
+      S_Q["🔍 查询外部表: 鞋子\n表: 单尺码列表-非账户\nappId: 6319db7e...6441\n(调用外部API查询尺码)"]
+
+      S_BR{"❓ 并行分支\ngatewayType: 2"}
+      S_Q --> S_BR
+
+      S_BR -->|"✅ 条件:\n[鞋子].status\n等于 'success'\nconditionId: 1"| S_OK
+      S_BR -->|"❌ 分支2:\n(无条件/默认)\nresultTypeId: 3"| S_SKIP["⬜ 跳过\n(查询失败不处理)"]
+
+      subgraph S_OK["鞋子查询成功"]
+        direction TB
+        S_ARR["🔄 获取数组对象\nactionId: 409\n数据源: 鞋子节点返回\n(提取结果数组)"]
+        S_CNT["🔢 获取数据条数\nactionId: 105\n数据源: 获取数组对象\n(统计结果数量)"]
+        S_ARR --> S_CNT
+
+        S_CNT_BR{"❓ 并行分支\ngatewayType: 2"}
+        S_CNT --> S_CNT_BR
+
+        S_CNT_BR -->|"✅ 条件:\n[获取数据条数].结果\n不在范围内 '0'\nconditionId: 12\n(有尺码数据)"| S_UP
+        S_CNT_BR -->|"❌ 分支2:\n(条数=0\n无匹配尺码)"| S_DEL
+
+        S_UP["✏️ 更新记录\n表: 挂售表-新逻辑\nactionId: 2 (更新)\n操作对象: 子流程入口记录\n\n字段映射:\njzsj(校准时间)\n← [系统].当前时间\nfieldId: 67c462...895d\ntype: 16 (日期时间)"]
+
+        S_DEL["🗑️ 删除记录\n表: 挂售表-新逻辑\nactionId: 3 (删除)\n操作对象: 子流程入口记录\n(无匹配尺码=下架)"]
+      end
+    end
+
+    %% ===== 衣服线 =====
+    subgraph CLOTH["👕 衣服处理线"]
+      direction TB
+      C_Q["🔍 查询外部表: 衣服\n表: 衣服单尺码列表数据\nappId: 646b7ff0...ceba\n(调用外部API查询尺码)"]
+
+      C_BR{"❓ 并行分支\ngatewayType: 2"}
+      C_Q --> C_BR
+
+      C_BR -->|"✅ 条件:\n[衣服].status\n等于 'success'\nconditionId: 1"| C_OK
+      C_BR -->|"❌ 分支2:\n(无条件/默认)\nresultTypeId: 3"| C_SKIP["⬜ 跳过\n(查询失败不处理)"]
+
+      subgraph C_OK["衣服查询成功"]
+        direction TB
+        C_ARR["🔄 获取数组对象\nactionId: 409\n数据源: 衣服节点返回\n(提取结果数组)"]
+        C_CNT["🔢 获取数据条数\nactionId: 105\n数据源: 获取数组对象\n(统计结果数量)"]
+        C_ARR --> C_CNT
+
+        C_CNT_BR{"❓ 并行分支\ngatewayType: 2"}
+        C_CNT --> C_CNT_BR
+
+        C_CNT_BR -->|"✅ 条件:\n[获取数据条数].结果\n不在范围内 '0'\nconditionId: 12\n(有尺码数据)"| C_UP
+        C_CNT_BR -->|"❌ 分支2:\n(条数=0\n无匹配尺码)"| C_DEL
+
+        C_UP["✏️ 更新记录\n表: 挂售表-新逻辑\nactionId: 2 (更新)\n操作对象: 子流程入口记录\n\n字段映射:\njzsj(校准时间)\n← [系统].当前时间\nfieldId: 67c462...895d\ntype: 16 (日期时间)"]
+
+        C_DEL["🗑️ 删除记录\n表: 挂售表-新逻辑\nactionId: 3 (删除)\n操作对象: 子流程入口记录\n(无匹配尺码=下架)"]
+      end
+    end
+  end
+
+  %% 通知节点
+  NOTIFY["📢 发送站内通知\n通知对象:\n• 张磊\n• 李义\n• 李聪\n(比价数据异常时告警)"]
+
+  %% ========== 样式 ==========
+  classDef trigger fill:#2196F3,color:#fff,stroke:#1565C0,stroke-width:2px
+  classDef query fill:#FF9800,color:#fff,stroke:#E65100,stroke-width:2px
+  classDef branch fill:#E91E63,color:#fff,stroke:#AD1457,stroke-width:2px
+  classDef write fill:#4CAF50,color:#fff,stroke:#2E7D32,stroke-width:2px
+  classDef delete fill:#f44336,color:#fff,stroke:#c62828,stroke-width:2px
+  classDef notify fill:#607D8B,color:#fff,stroke:#37474F,stroke-width:2px
+  classDef process fill:#00BCD4,color:#fff,stroke:#00838F,stroke-width:2px
+  classDef skip fill:#eeeeee,color:#999,stroke:#ccc,stroke-width:1px
+
+  class ENTRY trigger
+  class PROXY,PRICE,S_Q,C_Q query
+  class BR_TOP,S_BR,C_BR,S_CNT_BR,C_CNT_BR branch
+  class S_UP,C_UP write
+  class S_DEL,C_DEL delete
+  class S_ARR,C_ARR,S_CNT,C_CNT process
+  class NOTIFY notify
+  class S_SKIP,C_SKIP skip
+</pre>
+</div>
+
+<!-- 条件速查表 -->
+<div class="note">
+  <strong>条件速查表</strong><br/><br/>
+  <strong>顶层分支 (条件互斥):</strong><br/>
+  &nbsp;&nbsp;✅ <code>[比价数据].snk_id</code> <code>大于等于(conditionId:8)</code> 非空值 <b>OR</b> <code>[比价数据].snk_id</code> <code>等于(conditionId:1)</code> <code>"0"</code><br/>
+  &nbsp;&nbsp;❌ else → 发送站内通知<br/><br/>
+
+  <strong>鞋子/衣服外部查询后分支 (并行):</strong><br/>
+  &nbsp;&nbsp;✅ <code>[鞋子/衣服].status</code> <code>等于(conditionId:1)</code> <code>"success"</code> → 继续处理<br/>
+  &nbsp;&nbsp;❌ 默认 → 跳过<br/><br/>
+
+  <strong>数据条数判断后分支 (并行):</strong><br/>
+  &nbsp;&nbsp;✅ <code>[获取数据条数].结果</code> <code>不在范围内(conditionId:12)</code> <code>"0"</code> → 更新 <code>jzsj</code> = 当前时间<br/>
+  &nbsp;&nbsp;❌ 默认(条数=0) → 删除记录<br/><br/>
+
+  <strong>字段映射:</strong><br/>
+  &nbsp;&nbsp;更新节点: <code>jzsj</code> (fieldId: 67c462093d0942df847c895d, alias: jzsj) ← <code>[系统].当前时间</code> (nowTime, type:16/日期时间)<br/><br/>
+
+  <strong>涉及工作表:</strong><br/>
+  &nbsp;&nbsp;• 挂售表-新逻辑 (<code>6937d2e8be2ffd8cd2532a58</code>) — 主操作表, 读/更新/删除<br/>
+  &nbsp;&nbsp;• 比价数据 (<code>6290caed1e00e6d0665284c4</code>) — 查询 snk_id<br/>
+  &nbsp;&nbsp;• 芝麻代理 (<code>63edb8ac1c190a21fe376ad3</code>) — 获取代理配置<br/>
+  &nbsp;&nbsp;• 单尺码列表-非账户 (<code>6319db7e777f0d0aea396441</code>) — 外部表/鞋子尺码<br/>
+  &nbsp;&nbsp;• 衣服单尺码列表数据 (<code>646b7ff06ffb7551424aceba</code>) — 外部表/衣服尺码
+</div>
+
+<script>
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'default',
+  flowchart: {
+    useMaxWidth: true,
+    htmlLabels: true,
+    curve: 'basis',
+    nodeSpacing: 20,
+    rankSpacing: 30,
+    padding: 15,
+  },
+  themeVariables: {
+    fontSize: '12px',
+  }
+});
+</script>
+
+</body>
+</html>

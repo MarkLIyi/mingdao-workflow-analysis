@@ -102,7 +102,7 @@ node $SCRIPTS/analyze-workflow.mjs <URL或processId> --output ./reports
 - **批量查询替代逐条查询**: 工作流子流程每条记录查一次的表，代码中提前一次查完
 - **条件互斥替代并行**: 明确品类/类型后只调对应的API，不做无用调用
 - **直接调API替代集成中心**: 集成中心API的URL/Method/Body已提取，直接用fetch调用
-- **V3 API或MCP操作明道云数据**: 查询/更新/新增/删除通过V3 REST API或MCP协议
+- **数据读写分层**: 读走MongoDB直连（快10倍+），面向用户的表写走V3 API，后台表写走MongoDB直连
 
 #### Step B4: 编写独立脚本
 
@@ -216,7 +216,10 @@ const rows = await find("worksheetId", { fieldId: "value" }, { limit: 100 });
 await closeMongo();
 ```
 
-> 仅限私有部署环境，且仅用于只读查询。写操作走 V3 API。
+> 仅限私有部署环境。写操作策略：
+> - **面向用户的表**（前端要看/操作）→ 写走 V3 API（MongoDB直连写会被应用层缓存挡住，前端看不到变化）
+> - **后台数据表**（脚本消费、不需要前端看）→ 读写都走 MongoDB 直连（性能最优）
+> - **读操作** → 所有表都可以走 MongoDB 直连（比 API 快 10-50 倍）
 
 #### 8. 通用明道云知识
 → 读取 `references/mingdao_knowledge.md`

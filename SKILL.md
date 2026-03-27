@@ -204,7 +204,21 @@ node $SCRIPTS/mingdao-api-search.js --connect <关键词> --detail
 node $SCRIPTS/mingdao-api-search.js --search <关键词> --detail
 ```
 
-#### 7. 通用明道云知识
+#### 7. MongoDB 直连查询
+当用户需要高性能只读查询明道云工作表数据（比 API/MCP 快 10 倍以上，适合大数据量场景）：
+
+```javascript
+import { connectMongo, find, findOne, count, aggregate, distinct, closeMongo }
+  from "~/.claude/skills/mingdao-workflow-analysis/scripts/mingdao-mongo.mjs";
+
+await connectMongo();  // 需要 MONGO_URI 环境变量
+const rows = await find("worksheetId", { fieldId: "value" }, { limit: 100 });
+await closeMongo();
+```
+
+> 仅限私有部署环境，且仅用于只读查询。写操作走 V3 API。
+
+#### 8. 通用明道云知识
 → 读取 `references/mingdao_knowledge.md`
 
 ---
@@ -233,6 +247,9 @@ node $SCRIPTS/worksheet-references.mjs <worksheetId> [--name "表名"] [--app <a
 node $SCRIPTS/mingdao-api-search.js --list-connects
 node $SCRIPTS/mingdao-api-search.js --connect <关键词> --detail
 node $SCRIPTS/mingdao-api-search.js --search <关键词> --detail
+
+# ── MongoDB 通用只读查询（需要 MONGO_URI 环境变量） ──
+node $SCRIPTS/mingdao-mongo.mjs --test <worksheetId> [--limit N] [--filter '{"fieldId":"value"}']
 ```
 
 ## 递归提取能力

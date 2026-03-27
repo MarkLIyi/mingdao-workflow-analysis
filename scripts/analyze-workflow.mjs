@@ -177,45 +177,24 @@ function fmtSorts(sorts, controlMap) {
   });
 }
 
-// 全局节点映射 + 全局字段名映射（Phase 1.5 后填充）
+// 全局节点映射
 let _globalNodeMap = {};
-let _globalFieldNameMap = {};  // { fieldId: "字段名(别名)" }
-
-/** 构建全局 fieldId → 可读名称 映射（从 schemas 填充） */
-function buildFieldNameMap(schemas) {
-  _globalFieldNameMap = {};
-  for (const [, schema] of Object.entries(schemas)) {
-    if (!schema.fields?.length) continue;
-    for (const f of schema.fields) {
-      if (f.id && f.name) {
-        _globalFieldNameMap[f.id] = f.alias ? `${f.name}(${f.alias})` : f.name;
-      }
-    }
-  }
-}
-
-/** 将 fieldId 解析为可读字段名 */
-function resolveFieldName(fieldId) {
-  if (!fieldId) return fieldId;
-  return _globalFieldNameMap[fieldId] || fieldId;
-}
 
 function fmtFields(fields) {
   if (!fields?.length) return null;
   return fields.map(f => {
-    const rawTarget = f.desc || f.alias || f.fieldId;
-    const target = resolveFieldName(rawTarget);
+    const target = f.desc || f.alias || f.fieldId;
     let source = "";
     if (f.fieldValue?.startsWith?.("$")) {
       const m = f.fieldValue.match(/^\$([^-]+)-([^$]+)\$$/);
       if (m) {
         const rn = _globalNodeMap[m[1]];
-        source = `[${rn?.name || rn?.appName || m[1].substring(0,8)}].${rn?._controlMap?.[m[2]]?.name || resolveFieldName(m[2]) || m[2].substring(0,8)}`;
+        source = `[${rn?.name || rn?.appName || m[1].substring(0,8)}].${rn?._controlMap?.[m[2]]?.name || m[2].substring(0,8)}`;
       } else source = f.fieldValue;
     } else if (f.fieldValue) source = `"${f.fieldValue}"`;
     else if (f.fieldValueName) source = f.nodeName ? `[${f.nodeName}].${f.fieldValueName}` : f.fieldValueName;
-    else if (f.fieldValueId) source = `{${resolveFieldName(f.fieldValueId)}}`;
-    return { target, source, type: f.type, rawFieldId: f.fieldId };
+    else if (f.fieldValueId) source = `{${f.fieldValueId}}`;
+    return { target, source, type: f.type };
   });
 }
 
@@ -862,133 +841,26 @@ function describeTrigger(result) {
 }
 
 function describeActions(result) {
+  const actions = [];
   const allSteps = [];
   flattenSteps(result.chain, allSteps, "主");
   for (const [, sp] of Object.entries(result.subProcesses)) flattenSteps(sp.chain, allSteps, "子");
 
-  // 语义化分析：数据源表 → 外部API → 写入表
-  const readTables = new Set();
-  const writeTables = new Set();
-  const externalApis = [];
-
-  for (const s of allSteps) {
-    if ([7, 13].includes(s.step.typeId) && s.step.table) readTables.add(s.step.table);
-    if (s.step.typeId === 6 && s.step.table) writeTables.add(s.step.table);
-    if (s.step.typeId === 20 && s.step.table) writeTables.add(s.step.table);
-    if (s.step.typeId === 21 && s.step.table) writeTables.add(s.step.table);
-    if ([8, 17, 18, 25].includes(s.step.typeId)) {
-      externalApis.push(s.step.url || s.step.apiName || s.step.table || s.step.name);
-    }
-  }
-
-  // 生成语义化描述
-  const parts = [];
-  if (readTables.size) parts.push(`从「${[...readTables].join("」「")}」读取数据`);
-  if (externalApis.length) parts.push(`调用外部API(${externalApis.map(a => a.substring(0, 40)).join(", ")})`);
-  if (writeTables.size) parts.push(`写入「${[...writeTables].join("」「")}」`);
-
-  // 同时保留统计摘要
   const queries = allSteps.filter(s => [7, 13].includes(s.step.typeId));
   const updates = allSteps.filter(s => s.step.typeId === 6);
   const creates = allSteps.filter(s => s.step.typeId === 20);
+  const deletes = allSteps.filter(s => s.step.typeId === 21 || (s.step.typeId === 6 && s.step.action === "删除"));
   const externals = allSteps.filter(s => [8, 17, 18, 25].includes(s.step.typeId));
   const codes = allSteps.filter(s => s.step.typeId === 10 || s.step.typeId === 14);
-  const stats = [];
-  if (queries.length) stats.push(`${queries.length}次查询`);
-  if (externals.length) stats.push(`${externals.length}个外部调用`);
-  if (updates.length) stats.push(`${updates.length}次更新`);
-  if (creates.length) stats.push(`${creates.length}次新增`);
-  if (codes.length) stats.push(`${codes.length}个代码块`);
 
-  const semantic = parts.join(" → ") || "无明显数据操作";
-  const summary = stats.length ? `（共${stats.join("、")}）` : "";
-  return `${semantic}${summary}`;
-}
+  if (queries.length) actions.push(`查询${queries.length}次`);
+  if (externals.length) actions.push(`调用${externals.length}个外部API/集成`);
+  if (updates.length) actions.push(`更新${updates.length}处`);
+  if (creates.length) actions.push(`新增${creates.length}处`);
+  if (deletes.length) actions.push(`删除${deletes.length}处`);
+  if (codes.length) actions.push(`执行${codes.length}个代码块`);
 
-/**
- * Python → JS 简易翻译器
- * 处理工作流中常见的Python代码块（时间转换、JSON解析、字符串拼接等）
- */
-function translatePythonToJs(pyCode, inputs, outputs, padStr) {
-  const lines = [];
-  const pad = padStr || "";
-
-  // 提取输入输出
-  const inputNames = (inputs || []).map(i => i.name);
-  const outputNames = (outputs || []).map(o => o.name);
-
-  // 逐行翻译常见模式
-  const pyLines = pyCode.split("\n").filter(l => l.trim());
-  let translated = false;
-
-  // 检测常见模式：时间转换 + JSON解析 + 字符串拼接
-  const hasDatetime = pyCode.includes("datetime") || pyCode.includes("strftime");
-  const hasJsonLoads = pyCode.includes("json.loads");
-  const hasImageLoop = pyCode.includes("for v in") || pyCode.includes("imageUrl");
-
-  if (hasDatetime || hasJsonLoads) {
-    translated = true;
-
-    if (inputNames.length) {
-      lines.push(`${pad}// 输入: ${inputNames.join(", ")}`);
-    }
-
-    // JSON解析
-    if (hasJsonLoads) {
-      const dataVar = pyCode.match(/(\w+)\s*=\s*json\.loads\(([^)]+)\)/);
-      if (dataVar) {
-        lines.push(`${pad}const ${dataVar[1]} = JSON.parse(${dataVar[2].replace("input['data']", "input.data")});`);
-      }
-    }
-
-    // 时间转换
-    if (hasDatetime) {
-      const tzMatch = pyCode.match(/timedelta\(hours=(\d+)\)/);
-      const tz = tzMatch ? tzMatch[1] : "9";
-      const fmtMatch = pyCode.match(/def\s+(\w+)\((\w+)\)/);
-      if (fmtMatch) {
-        lines.push(`${pad}function ${fmtMatch[1]}(utcStr) {`);
-        lines.push(`${pad}  return new Date(utcStr).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false });`);
-        lines.push(`${pad}}`);
-      }
-    }
-
-    // 字符串拼接 → 模板字符串
-    const contentBuild = pyCode.match(/content\s*=\s*"(.+?)"\s*\+/);
-    if (contentBuild) {
-      lines.push(`${pad}let content = "";`);
-      // 时间行
-      const timeCall = pyCode.match(/(\w+)\(data\['(\w+)'\]\)/);
-      if (timeCall) lines.push(`${pad}content += \`消息时间: \${${timeCall[1]}(data.${timeCall[2]})}\\n\`;`);
-      // 内容行
-      if (pyCode.includes("data['content']")) lines.push(`${pad}content += \`内容: \${data.content}\\n\`;`);
-    }
-
-    // 图片循环
-    if (hasImageLoop) {
-      lines.push(`${pad}const images = data.images || [];`);
-      lines.push(`${pad}if (images.length > 0) {`);
-      lines.push(`${pad}  content += "图片地址:\\n";`);
-      lines.push(`${pad}  for (const img of images) content += (img.imageUrl || "") + "\\n";`);
-      lines.push(`${pad}}`);
-    }
-
-    // 输出
-    if (outputNames.length) {
-      lines.push(`${pad}const output = { ${outputNames.map(n => `${n}: content`).join(", ")} };`);
-    }
-  }
-
-  if (!translated) {
-    // 降级：注释形式展示原Python代码
-    lines.push(`${pad}// Python原代码（需手动翻译）:`);
-    for (const line of pyLines.slice(0, 10)) {
-      lines.push(`${pad}// ${line}`);
-    }
-    if (pyLines.length > 10) lines.push(`${pad}// ... (共${pyLines.length}行)`);
-  }
-
-  return lines.join("\n");
+  return actions.join("，") || "无明显数据操作";
 }
 
 function generatePseudoCode(result) {
@@ -1046,16 +918,6 @@ function generatePseudoCode(result) {
         if (sp && step.dataSource) {
           lines.push(`${pad()}for (const record of ${step.dataSource || "records"}) {`);
           indent++;
-          // 标注子流程中可提升的查询
-          const spSteps = [];
-          if (sp.chain) flattenSteps(sp.chain, spSteps, "子");
-          const staticQueries = spSteps.filter(s =>
-            [7, 13].includes(s.step.typeId) && s.step.filters?.every(f => !f.includes("[封装业务流程]") && !f.includes("[本流程参数]"))
-          );
-          if (staticQueries.length) {
-            lines.push(`${pad()}// ⚠️ 可优化: 以下查询与循环变量无关，可提升到循环外（减少${step.dataSource ? "N-1" : ""}次重复查询）`);
-            for (const sq of staticQueries) lines.push(`${pad()}//   - query("${sq.step.table}")`);
-          }
           walkSteps(sp.chain, true);
           indent--;
           lines.push(`${pad()}}`);
@@ -1070,10 +932,7 @@ function generatePseudoCode(result) {
       if ([7, 13].includes(step.typeId)) {
         const filterDesc = step.filters?.length ? ` 筛选: ${step.filters[0]}` : "";
         const limitDesc = step.limit ? ` 限${step.limit}条` : "";
-        // 标注循环内的静态查询
-        const isStatic = isInLoop && step.filters?.every(f => !f.includes("[封装业务流程]") && !f.includes("[本流程参数]"));
-        const optHint = isStatic ? `  // ⚠️ 可提升到循环外` : "";
-        desc = `${pad()}const ${varName(step.name)} = await query("${step.table || "?"}");${filterDesc}${limitDesc}${optHint}`;
+        desc = `${pad()}const ${varName(step.name)} = await query("${step.table || "?"}");${filterDesc}${limitDesc}`;
       } else if (step.typeId === 6 || step.typeId === 20) {
         desc = `${pad()}await ${step.action === "删除" ? "deleteRecord" : step.typeId === 20 ? "createRecord" : "updateRecord"}("${step.table || "?"}");`;
         if (step.fieldMappings?.length) {
@@ -1088,14 +947,7 @@ function generatePseudoCode(result) {
       } else if (step.typeId === 17) {
         desc = `${pad()}const ${varName(step.name)} = await fetch("${step.url || "?"}", { method: "${step.method || "GET"}" });`;
       } else if (step.typeId === 10 || step.typeId === 14) {
-        if (step.language === "python" && step.code) {
-          desc = `${pad()}// 代码块「${step.name}」— JS等价实现:\n`;
-          desc += translatePythonToJs(step.code, step.inputs, step.outputs, pad());
-        } else if (step.code) {
-          desc = `${pad()}// 代码块「${step.name}」(${step.language || "js"}):\n${pad()}// ${step.code.split("\n").slice(0, 8).join(`\n${pad()}// `)}`;
-        } else {
-          desc = `${pad()}// 代码块「${step.name}」(${step.language || "js"})`;
-        }
+        desc = `${pad()}// 代码块「${step.name}」(${step.language || "js"}) — 见原代码`;
       } else if ([27, 11, 22, 28].includes(step.typeId)) {
         desc = `${pad()}// 通知: ${step.recipients?.join(", ") || "?"} — ${step.name}`;
       } else if (step.typeId === 12 || step.typeId === 26) {
@@ -1218,11 +1070,7 @@ function generateMcpTemplates(result, schemas) {
       lines.push(`    row_id: rowId,`);
       lines.push(`    fields,`);
       if (op.fieldMappings?.length) {
-        lines.push(`    // 字段映射:`);
-        for (const f of op.fieldMappings.slice(0, 5)) {
-          const resolvedTarget = resolveFieldName(f.rawFieldId || f.target);
-          lines.push(`    //   ${resolvedTarget}(${f.rawFieldId || ""}) ← ${f.source}`);
-        }
+        lines.push(`    // 字段映射: ${op.fieldMappings.slice(0, 3).map(f => `${f.target}←${f.source}`).join(", ")}`);
       }
       lines.push(`  });`);
       lines.push(`}\n`);
@@ -1233,13 +1081,6 @@ function generateMcpTemplates(result, schemas) {
       lines.push(`  return mcpCall("create_record", {`);
       lines.push(`    worksheet_id: CONFIG.worksheets.${sanitize(op.table)},`);
       lines.push(`    fields,`);
-      if (op.fieldMappings?.length) {
-        lines.push(`    // 字段映射:`);
-        for (const f of op.fieldMappings.slice(0, 5)) {
-          const resolvedTarget = resolveFieldName(f.rawFieldId || f.target);
-          lines.push(`    //   ${resolvedTarget}(${f.rawFieldId || ""}) ← ${f.source}`);
-        }
-      }
       lines.push(`  });`);
       lines.push(`}\n`);
     }
@@ -1512,17 +1353,6 @@ async function main() {
 
     const schemas = await buildTableSchemas(tables);
     const apiConfigs = await fetchIntegrationApiConfigs(integrationApiIds);
-
-    // 构建全局字段名映射（供后续 Phase 4 使用）
-    buildFieldNameMap(schemas);
-
-    // MCP 权限预检：验证所有表是否可通过MCP访问
-    const inaccessible = Object.entries(schemas).filter(([, s]) => s.source === "节点提取" && s.fields?.length === 0);
-    if (inaccessible.length) {
-      console.error(`  ⚠️ 以下表无法通过MCP访问（字段数为0，可能AppKey权限不足）:`);
-      for (const [id, s] of inaccessible) console.error(`    - ${s.name} (${id})`);
-      console.error("");
-    }
 
     // Phase 2: 自动诊断
     console.error("\n🔍 Phase 2: 自动诊断...\n");

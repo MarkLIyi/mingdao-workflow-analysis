@@ -204,7 +204,13 @@ node $SCRIPTS/mingdao-api-search.js --connect <关键词> --detail
 node $SCRIPTS/mingdao-api-search.js --search <关键词> --detail
 ```
 
-#### 7. MongoDB 直连查询
+#### 7. MongoDB 直写规范
+当用户需要通过 MongoDB 直连写入明道云工作表数据（批量写入、高频更新、绕过 V3 API 频控）：
+→ 读取 `references/mongodb-direct-write.md`
+
+**关键规范：** INSERT 必须补全系统字段（wsid/ctime/caid/ownerid/users/owners/sharerange），数据字段必须用 controlId 不能用 alias，日期必须是 Date 对象不能是字符串。否则前端会"服务异常"或排序错乱。
+
+#### 8. MongoDB 直连查询
 当用户需要高性能只读查询明道云工作表数据（比 API/MCP 快 10 倍以上，适合大数据量场景）：
 
 ```javascript
